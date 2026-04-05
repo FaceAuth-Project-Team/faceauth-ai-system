@@ -4,7 +4,6 @@ import streamlit as st
 import pickle
 import cv2
 import numpy as np
-import time
 
 # Ensure Python can see the 'src' folder correctly
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -15,75 +14,96 @@ from src.data_collection import capture_face_images
 from src.train import train_model
 from src.predict import predict_face
 
-MODEL_PATH = "models/face_model.pkl"
-ENCODER_PATH = "models/label_encoder.pkl"
+# ── Paths ─────────────────────────────────────────────────────────
+MODEL_PATH   = os.path.join(ROOT_DIR, "models", "face_model.pkl")
+ENCODER_PATH = os.path.join(ROOT_DIR, "models", "label_encoder.pkl")
+# ─────────────────────────────────────────────────────────────────
 
-# --- STEP 9: UI ENHANCEMENT ---
-st.set_page_config(page_title="FaceAuth AI", page_icon="🔒", layout="centered")
-
+# ── Page Config ───────────────────────────────────────────────────
+st.set_page_config(page_title="FaceAuth AI", page_icon="lock", layout="centered")
 st.markdown("""
     <style>
-    .stButton>button { width: 100%; border-radius: 5px; background-color: #007bff; color: white; }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        background-color: #007bff;
+        color: white;
+    }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-st.title("🛡️ FaceAuth: AI Login")
+st.title("FaceAuth: AI Login")
 st.markdown("---")
 
 page = st.sidebar.selectbox("Navigation", ["Register User", "Login System"])
 
-# -------- REGISTER PAGE --------
+# ── REGISTER PAGE ─────────────────────────────────────────────────
 if page == "Register User":
-    st.subheader("👤 User Registration")
-    name = st.text_input("Enter Full Name", placeholder="e.g. John Doe")
-    num_images = st.select_slider("Image Quality", options=[5, 10, 15], value=10)
+    st.subheader("User Registration")
 
-    if st.button("📸 Start Face Capture"):
+    name       = st.text_input("Enter Full Name", placeholder="e.g. John Doe")
+    num_images = st.select_slider("Number of Images", options=[5, 10, 15], value=10)
+
+    if st.button("Start Face Capture"):
         if not name.strip():
             st.error("Please enter a name first.")
         else:
-            with st.spinner("Accessing Camera..."):
-                success = capture_face_images(name, num_images)
+            with st.spinner("Accessing camera... Look at the webcam window that opens."):
+                success = capture_face_images(name.strip(), num_images)
             if success:
-                st.success(f"✅ Success: Captured {num_images} images for {name}!")
+                st.success(f"Captured {num_images} images for {name}. You can now train the model.")
             else:
-                st.warning("⚠️ Face capture failed. Check camera access.")
+                st.warning("Face capture failed or was interrupted. Try again.")
 
     st.markdown("---")
-    if st.button("⚙️ Train Security Model"):
-        with st.status("Training AI...", expanded=False) as status:
-            if train_model():
-                status.update(label="Training Complete!", state="complete")
-                st.balloons()
-            else:
-                status.update(label="No data found to train.", state="error")
 
-# -------- LOGIN PAGE (STEP 8 & 9) --------
+    if st.button("Train Security Model"):
+        with st.spinner("Training model..."):
+            result = train_model()
+        if result:
+            st.success("Model trained successfully!")
+            st.balloons()
+        else:
+            st.error("Training failed. Make sure at least 2 users are registered and preprocessing has been run.")
+
+# ── LOGIN PAGE ────────────────────────────────────────────────────
 elif page == "Login System":
-    st.subheader("🔐 Secure Login")
+    st.subheader("Secure Login")
 
-    # --- STEP 8: THRESHOLD LOGIC ---
+    # Step 8: Confidence threshold
     with st.expander("Security Settings"):
-        threshold = st.slider("Sensitivity Threshold", 0.0, 1.0, 0.6)
+        threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.6,
+                              help="Higher = stricter. Lower = more lenient.")
 
     if not os.path.exists(MODEL_PATH):
-        st.warning("⚠️ System is empty. Please register a user first.")
+        st.warning("No model found. Please register users and train the model first.")
     else:
         image = st.camera_input("Look at the camera to log in")
+
         if image:
             with st.spinner("Checking identity..."):
+                # Load model and encoder
                 model = pickle.load(open(MODEL_PATH, "rb"))
-                le = pickle.load(open(ENCODER_PATH, "rb"))
-                
-                img = cv2.imdecode(np.frombuffer(image.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+                le    = pickle.load(open(ENCODER_PATH, "rb"))
+
+                # Decode the image from Streamlit camera input
+                img = cv2.imdecode(
+                    np.frombuffer(image.getvalue(), np.uint8),
+                    cv2.IMREAD_COLOR
+                )
+
+                # Run prediction (Step 7)
                 label, confidence = predict_face(img, model, le, threshold)
 
+            # Show result
             if label is None:
-                st.warning("❓ No face detected.")
+                st.warning("No face detected. Please look directly at the camera.")
+
             elif label == "Denied":
-                st.error(f"🚫 ACCESS DENIED (Score: {confidence*100:.1f}%)")
-                st.progress(confidence)
+                st.error(f"ACCESS DENIED  (Confidence: {confidence * 100:.1f}%)")
+                st.progress(float(confidence))
+
             else:
-                st.success(f"✅ WELCOME BACK, {label.upper()}!")
-                st.metric("Identity Confidence", f"{confidence*100:.1f}%")
-                st.progress(confidence)
+                st.success(f"WELCOME BACK, {label.upper()}!")
+                st.metric("Identity Confidence", f"{confidence * 100:.1f}%")
+                st.progress(float(confidence))
