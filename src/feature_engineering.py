@@ -128,6 +128,39 @@ def build_features(processed_dir, output_dir):
     return True
 
 
+# Keep all your imports and global variables at the top
+# ... (existing CASCADE_PATH etc)
+
+def save_frame(image_bytes, username, count):
+    # Ensure directories exist before saving to avoid OS errors
+    raw_folder = os.path.join(DATASET_DIR, username)
+    processed_folder = os.path.join(PROCESSED_DIR, username)
+    
+    os.makedirs(raw_folder, exist_ok=True)
+    os.makedirs(processed_folder, exist_ok=True)
+
+    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None: return False
+
+    face_detector = cv2.CascadeClassifier(CASCADE_PATH)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = face_detector.detectMultiScale(gray, 1.1, 5) # Increased neighbors for better stability
+
+    if len(faces) == 0:
+        return False
+
+    # Selection logic for largest face remains identical
+    x, y, w, h = max(faces, key=lambda r: r[2]*r[3])
+    face_crop = img[y:y+h, x:x+w]
+
+    raw_path  = os.path.join(raw_folder, f"{count:04d}.jpg")
+    proc_path = os.path.join(processed_folder, f"{count:04d}.jpg")
+
+    cv2.imwrite(raw_path, cv2.resize(face_crop, RAW_SIZE))
+    cv2.imwrite(proc_path, preprocess_face(face_crop))
+
+    return True
+
 # ── Entry point ───────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 50)

@@ -3,61 +3,57 @@ import pickle
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
- 
-# ── Configuration ─────────────────────────────────────────────────
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+# --- Configuration ---
 X_PATH     = "models/X.npy"
 Y_PATH     = "models/y.npy"
 MODEL_PATH = "models/face_model.pkl"
-# ─────────────────────────────────────────────────────────────────
- 
- 
+
 def train_model():
     """
-    Loads X and y from disk, trains KNN, and saves the model.
-    Returns True if successful, False otherwise.
+    Trains a robust Pipeline: Scaler -> PCA (Eigenfaces) -> KNN
     """
- 
-    # Load features saved by feature_engineering.py
     if not os.path.exists(X_PATH) or not os.path.exists(Y_PATH):
-        print("ERROR: Feature files not found.")
-        print("Please run feature_engineering.py first.")
+        print("ERROR: Feature files not found. Run feature_engineering.py first.")
         return False
- 
+
     X = np.load(X_PATH)
     y = np.load(Y_PATH)
- 
-    print(f"Loaded X: {X.shape}  (images x features)")
-    print(f"Loaded y: {y.shape}  (labels)")
- 
+
     if len(np.unique(y)) < 2:
-        print("ERROR: Need at least 2 registered users to train.")
+        print("ERROR: Need at least 2 users to distinguish between identities.")
         return False
- 
-    if len(X) < 5:
-        print("ERROR: Not enough images to train. Register more faces.")
-        return False
- 
-    # Split the data: 80% for learning, 20% for testing performance
+
+    # 1. Split Data (80% Train, 20% Test)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
- 
-    # Initialize and train KNN
-    model = KNeighborsClassifier(n_neighbors=3)
-    model.fit(X_train, y_train)
- 
-    # Save the model
+
+    # 2. Create the Eigenface Pipeline
+    # PCA(n_components=0.95) keeps enough 'features' to explain 95% of the face variance
+    face_pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('pca', PCA(n_components=0.95, whiten=True)), 
+        ('knn', KNeighborsClassifier(n_neighbors=5, weights='distance'))
+    ])
+
+    # 3. Train the Pipeline
+    print(f"Training on {len(X_train)} samples...")
+    face_pipeline.fit(X_train, y_train)
+
+    # 4. Check Internal Accuracy (Optional but good for logs)
+    score = face_pipeline.score(X_test, y_test)
+    print(f"✅ Training Complete. Validation Accuracy: {score:.2%}")
+
+    # 5. Save the entire Pipeline
     os.makedirs("models", exist_ok=True)
     with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
- 
-    print("Model trained and saved to models/face_model.pkl")
+        pickle.dump(face_pipeline, f)
+
     return True
- 
- 
-# ── Entry point ───────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    print("=" * 50)
-    print("   FaceAuth - Model Training")
-    print("=" * 50)
     train_model()

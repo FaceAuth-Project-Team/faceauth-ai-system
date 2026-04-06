@@ -13,117 +13,146 @@ if ROOT_DIR not in sys.path:
 from src.feature_engineering import build_features
 from src.train import train_model
 from src.predict import predict_face
-from src.data_collection import save_frame  # ✅ NEW
+from src.data_collection import save_frame
 
-# Paths
+# --- Configuration ---
 MODEL_PATH   = os.path.join(ROOT_DIR, "models", "face_model.pkl")
 ENCODER_PATH = os.path.join(ROOT_DIR, "models", "label_encoder.pkl")
+CONST_THRESHOLD = 0.65  # Hardcoded as requested
 
-# ── Page config ─────────────────────────────────────────
-st.set_page_config(
-    page_title="FaceAuth AI",
-    page_icon=":lock:",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
+# --- Modern UI Styling ---
+st.set_page_config(page_title="FaceAuth AI", page_icon="🔐", layout="wide")
 
-# ── (YOUR CSS + UI DESIGN REMAINS SAME) ──
-# 👉 I’m skipping re-pasting your long CSS for clarity
-# KEEP your existing CSS block here EXACTLY as is
-
-# ── Hero ─────────────────────────────────────────
 st.markdown("""
-<div style="text-align:center; padding:2.5rem 0 2rem;">
-    <h1>FaceAuth AI</h1>
-</div>
-""", unsafe_allow_html=True)
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #007bff;
+        color: white;
+        font-weight: bold;
+    }
+    .stProgress > div > div > div > div { background-color: #007bff; }
+    .status-box {
+        padding: 20px;
+        border-radius: 10px;
+        background-color: white;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+    h1 { color: #1e3d59; text-align: center; font-family: 'Segoe UI'; }
+    </style>
+    """, unsafe_allow_html=True)
 
-tab_register, tab_login = st.tabs(["Register", "Login"])
+# --- Sidebar Navigation ---
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/000000/fingerprint-accepted.png", width=100)
+    st.title("Control Panel")
+    page = st.radio("Navigate", ["🏠 Home", "📝 Register New User", "🔑 Secure Login"])
+    st.info(f"System Threshold: {int(CONST_THRESHOLD*100)}%")
 
-# ════════════════════════════════════════════════════════
-# REGISTER TAB (FIXED)
-# ════════════════════════════════════════════════════════
-with tab_register:
+# --- 🏠 HOME PAGE ---
+if page == "🏠 Home":
+    st.markdown("<h1>FaceAuth AI Security System</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns(3)
+    with col2:
+        st.markdown("""
+        <div class="status-box">
+            <h3>System Status</h3>
+            <p style='color:green;'>● Online</p>
+            <p>Ready for Authentication</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    name       = st.text_input("Full Name")
-    num_images = st.select_slider("Capture Quality", options=[5, 10, 15], value=10)
+# --- 📝 REGISTER PAGE ---
+elif page == "📝 Register New User":
+    st.markdown("<h1>User Registration</h1>", unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        name = st.text_input("Enter Full Name", placeholder="e.g. Yordi")
+        
+        # --- NEW: Editable Capture Count ---
+        num_images = st.slider("Target Number of Images", 5, 50, 20)
+        st.info(f"Aim for {num_images} captures for better accuracy.")
+        
+        if "capture_count" not in st.session_state:
+            st.session_state.capture_count = 0
 
-    if "capture_count" not in st.session_state:
-        st.session_state.capture_count = 0
+        if st.button("Reset & Clear Camera"):
+            st.session_state.capture_count = 0
+            st.rerun()
 
-    st.info("Use the camera below. Capture multiple images.")
+    with col2:
+        st.write("### Camera Feed")
+        
+        # Only show camera and capture if we haven't reached the limit
+        if st.session_state.capture_count < num_images:
+            image = st.camera_input("Capture facial data", key="reg_cam")
 
-    image = st.camera_input("", key="register_cam")
+            if image and name.strip():
+                success = save_frame(
+                    image.getvalue(),
+                    name.strip(),
+                    st.session_state.capture_count + 1
+                )
 
-    if image and name.strip():
-
-        success = save_frame(
-            image.getvalue(),
-            name.strip(),
-            st.session_state.capture_count + 1
-        )
-
-        if success:
-            st.session_state.capture_count += 1
-            st.success(f"Captured {st.session_state.capture_count}/{num_images}")
+                if success:
+                    st.session_state.capture_count += 1
+                    st.toast(f"Saved {st.session_state.capture_count}/{num_images}", icon="📸")
+                else:
+                    st.warning("No face detected! Adjust your position.")
         else:
-            st.warning("No face detected. Try again.")
+            st.success("✅ Target Reached! You can now train the model.")
+            st.balloons()
 
-    if st.session_state.capture_count > 0:
-        st.progress(st.session_state.capture_count / num_images)
+        # --- Fixed Progress Bar Logic ---
+        if st.session_state.capture_count > 0:
+            # Use min() to ensure value is never > 1.0 even if state glitches
+            progress_val = min(float(st.session_state.capture_count / num_images), 1.0)
+            st.progress(progress_val)
+            st.write(f"**Status:** {st.session_state.capture_count} / {num_images} Images Collected")
 
-    if st.session_state.capture_count >= num_images:
-        st.success(f"{num_images} images captured for {name}")
-        st.session_state.capture_count = 0
-
+    # --- Training Trigger ---
     st.markdown("---")
-
-    if st.button("Train Security Model"):
-        with st.spinner("Extracting features..."):
-            features_ok = build_features(
-                os.path.join(ROOT_DIR, "data", "processed"),
-                os.path.join(ROOT_DIR, "models")
-            )
-
-        if not features_ok:
-            st.error("Need at least 2 users.")
-        else:
-            with st.spinner("Training model..."):
-                result = train_model()
-
-            if result:
-                st.success("Model trained successfully!")
-            else:
-                st.error("Training failed.")
-
-# ════════════════════════════════════════════════════════
-# LOGIN TAB (UNCHANGED)
-# ════════════════════════════════════════════════════════
-with tab_login:
-
-    threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.6, 0.05)
-
+    if st.session_state.capture_count >= num_images:
+        if st.button("🚀 Finalize & Train Security Model"):
+            with st.spinner("Analyzing biometric features..."):
+                features_ok = build_features(
+                    os.path.join(ROOT_DIR, "data", "processed"),
+                    os.path.join(ROOT_DIR, "models")
+                )
+                if features_ok and train_model():
+                    st.success("Identity database successfully updated!")
+                    
+# --- 🔑 LOGIN PAGE ---
+elif page == "🔑 Secure Login":
+    st.markdown("<h1>Biometric Authentication</h1>", unsafe_allow_html=True)
+    
     if not os.path.exists(MODEL_PATH):
-        st.warning("Train model first.")
+        st.warning("⚠️ Access Denied: No trained models found. Please register a user first.")
     else:
-        image = st.camera_input("", key="login_cam")
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            image = st.camera_input("Look directly at the camera", key="login_cam")
+        
+        with col2:
+            st.write("### Identity Results")
+            if image:
+                model = pickle.load(open(MODEL_PATH, "rb"))
+                le = pickle.load(open(ENCODER_PATH, "rb"))
 
-        if image:
-            model = pickle.load(open(MODEL_PATH, "rb"))
-            le    = pickle.load(open(ENCODER_PATH, "rb"))
+                img = cv2.imdecode(np.frombuffer(image.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+                
+                # predict_face now uses CONST_THRESHOLD
+                label, confidence = predict_face(img, model, le, CONST_THRESHOLD)
 
-            img = cv2.imdecode(
-                np.frombuffer(image.getvalue(), np.uint8),
-                cv2.IMREAD_COLOR
-            )
-
-            label, confidence = predict_face(img, model, le, threshold)
-
-            if label is None:
-                st.warning("No face detected")
-
-            elif label == "Denied":
-                st.error(f"Access Denied ({confidence:.2f})")
-
-            else:
-                st.success(f"Welcome {label} ({confidence:.2f})")
+                if label is None:
+                    st.warning("Scanning for face...")
+                elif label == "Denied":
+                    st.error(f"ACCESS DENIED\nConfidence: {confidence:.2%}")
+                else:
+                    st.success(f"ACCESS GRANTED\nWelcome, {label}\nConfidence: {confidence:.2%}")
